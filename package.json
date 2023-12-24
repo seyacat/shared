@@ -1,0 +1,30 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "description": "Client server share reactive object",
+  "main": "shared.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seyacat/shared.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/seyacat/shared/issues"
+  },
+  "homepage": "https://github.com/seyacat/shared#readme",
+  "dependencies": {
+    "@seyacat/reactive": "^1.0.2",
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
+    "http": "^0.0.1-security",
+    "uuid": "^9.0.1",
+    "ws": "^8.15.1"
+  }
+}
