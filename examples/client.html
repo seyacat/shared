@@ -5,11 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
   </head>
-  <body></body>
+  <body>
+    <div id="app">
+      <button id="btn01" onclick="shared.server.test++">Server:</button>
+      <button id="btn02" onclick="shared.client.test2++">Client:</button>
+    </div>
+  </body>
   <script src="shared.js"></script>
   <script>
-    setTimeout(() => {
-      const shared = Shared();
-    }, 1000);
+    window.addEventListener("load", function () {
+      window.shared = Shared();
+
+      shared.server.subscribe(null, (data) => {
+        const { prop, value } = data;
+        if (prop == "test") {
+          document.getElementById("btn01").innerHTML = "Server:" + value;
+        }
+      });
+      shared.client.subscribe(null, (data) => {
+        const { prop, value } = data;
+        if (prop == "test2") {
+          document.getElementById("btn02").innerHTML = "Client:" + value;
+        }
+      });
+      shared.client.test2 = 0;
+    });
   </script>
 </html>

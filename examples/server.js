@@ -15,3 +15,15 @@ app.use("/", express.static("examples"));
 const server = http.createServer(app);
 
 const shared = new Shared({ server });
+shared.subscribe(null, (data) => console.log(data.path.join("."), data.value));
+
+shared.server.test = 1;
+setInterval(() => {
+  shared.server.test += 1;
+
+  Object.keys(shared.clients._).map(
+    (k) =>
+      (shared.clients[k].test2 =
+        shared.clients[k].test2 != null ? shared.clients[k].test2 + 1 : 0)
+  );
+}, 5000);
