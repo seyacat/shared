@@ -11,7 +11,9 @@ if (typeof module !== "undefined") {
   document.head.appendChild(reactive);
 }
 
-function Shared(options = { port: null, server: null, url: null }) {
+function Shared(
+  options = { port: null, server: null, url: null, clienPaths: null }
+) {
   let reactive;
   if (options.server) {
     //SERVER
@@ -21,8 +23,14 @@ function Shared(options = { port: null, server: null, url: null }) {
     });
     reactive.server.subscribe(null, (data) => {
       //TODO DELETE DISCONNECTED CLIENTS
-      for (let client of Object.values(reactive._rel.clients)) {
-        client.send(
+      for (let [key, client] of reactive.clients) {
+        //DELETE DISNONNECTED
+        if (client._rel.readyState > 1) {
+          delete reactive.clients[key];
+          continue;
+        }
+        //SEND CHANGE
+        client._rel.send(
           JSON.stringify({
             ...data,
             path: ["server", ...data.path],
@@ -35,10 +43,13 @@ function Shared(options = { port: null, server: null, url: null }) {
     reactive.clients.subscribe(null, (data) => {
       //TODO DELETE DISCONNECTED CLIENTS
       if (data.path.length <= 1) return;
-      const client = reactive._rel.clients[data.path.slice(0, 1)];
-
-      if (client && client.readyState === 1) {
-        client.send(
+      const client = reactive.clients[data.path.slice(0, 1)];
+      //DELETE DISNONNECTED
+      if (client._rel.readyState > 1) {
+        delete reactive.clients[data.path.slice(0, 1)];
+      }
+      if (client && client._rel.readyState === 1) {
+        client._rel.send(
           JSON.stringify({
             ...data,
             path: ["client", ...data.path.slice(1)],
@@ -70,17 +81,17 @@ function Shared(options = { port: null, server: null, url: null }) {
   return reactive;
 }
 class SharedClass {
-  constructor(options = { port: null, server: null, url: null }) {
+  constructor(
+    options = { port: null, server: null, url: null, clienPaths: null }
+  ) {
     this.options = { ...{ port: 12556, server: null }, ...options };
     if (this.options.server) {
       //SERVER
-      this.clients = {};
       this.wss = new WS.Server({ server: this.options.server });
       this.wss.on(
         "connection",
         function connection(ws) {
           ws.id = uuidv4();
-          this.clients[ws.id] = ws;
           if (!this.reactive.clients[ws.id]) {
             this.reactive.clients[ws.id] = Reactivate(ws);
           }
@@ -96,6 +107,20 @@ class SharedClass {
                 return;
               }
               if (Array.isArray(data.path)) {
+                //CHECK CLIENT PATHS
+
+                if (this.options.clientPaths) {
+                  const localPath = data.path.join(".");
+                  console.log(this.options.clientPaths[localPath]);
+                  if (
+                    !this.options.clientPaths[localPath] ||
+                    this.options.clientPaths[localPath].type !==
+                      typeof data.value
+                  ) {
+                    ws.send(JSON.stringify({ error: `${data.path} rejected` }));
+                    return;
+                  }
+                }
                 const path = ["clients", ws.id, ...data.path];
                 let r = this.reactive;
                 for (let step of path.slice(0, -1)) {
@@ -133,14 +158,19 @@ class SharedClass {
       try {
         data = JSON.parse(event.data);
       } catch (e) {
+        this.reactive.error = e;
         console.log("error", e);
         return;
       }
-      let r = this.reactive;
-      for (let step of data.path.slice(0, -1)) {
-        r = r[step];
+      if (data.path) {
+        let r = this.reactive;
+        for (let step of data.path.slice(0, -1)) {
+          r = r[step];
+        }
+        r[data.path.slice(-1)] = data.value;
+      } else {
+        this.reactive.error = data;
       }
-      r[data.path.slice(-1)] = data.value;
     };
 
     this.ws.onclose = () => {

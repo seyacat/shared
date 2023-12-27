@@ -14,7 +14,13 @@ app.use("/", express.static("examples"));
 
 const server = http.createServer(app);
 
-const shared = new Shared({ server });
+const clientPaths = {
+  test2: {
+    w: true,
+    type: "number",
+  },
+};
+const shared = new Shared({ server, clientPaths });
 shared.subscribe(null, (data) => console.log(data.path.join("."), data.value));
 
 shared.server.test = 1;

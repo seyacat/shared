@@ -15,7 +15,9 @@
   <script>
     window.addEventListener("load", function () {
       window.shared = Shared();
-
+      shared.subscribe(null, (data) => {
+        console.log(data.path.join("."), data.value);
+      });
       shared.server.subscribe(null, (data) => {
         const { prop, value } = data;
         if (prop == "test") {
