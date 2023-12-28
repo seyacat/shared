@@ -41,6 +41,11 @@ function Shared(
       }
     });
     reactive.clients.subscribe(null, (data) => {
+      //STOP MUTTED EVENTS
+      if (reactive._rel.mutted.has(["clients", ...data.path].join("."))) {
+        console.log("mutted");
+        return;
+      }
       //TODO DELETE DISCONNECTED CLIENTS
       if (data.path.length <= 1) return;
       const client = reactive.clients[data.path.slice(0, 1)];
@@ -67,6 +72,9 @@ function Shared(
     });
     reactive.client.subscribe(null, (data) => {
       if (reactive._rel.ws.readyState == 1) {
+        if (reactive._rel.mutted.has(["client", ...data.path].join("."))) {
+          return;
+        }
         //OPEN
         reactive._rel.ws.send(
           JSON.stringify({
@@ -84,6 +92,7 @@ class SharedClass {
   constructor(
     options = { port: null, server: null, url: null, clienPaths: null }
   ) {
+    this.mutted = new Set();
     this.options = { ...{ port: 12556, server: null }, ...options };
     if (this.options.server) {
       //SERVER
@@ -113,15 +122,14 @@ class SharedClass {
                   const localPath = data.path.join(".");
                   console.log(this.options.clientPaths[localPath]);
                   if (
-                    !this.options.clientPaths[localPath] ||
-                    this.options.clientPaths[localPath].type !==
-                      typeof data.value
+                    !this.options.clientPaths[localPath]?.validation(data.value)
                   ) {
                     ws.send(JSON.stringify({ error: `${data.path} rejected` }));
                     return;
                   }
                 }
                 const path = ["clients", ws.id, ...data.path];
+                this.mutted.add(path.join("."));
                 let r = this.reactive;
                 for (let step of path.slice(0, -1)) {
                   if (!r[step]) {
@@ -130,6 +138,7 @@ class SharedClass {
                   r = r[step];
                 }
                 r[path.slice(-1)] = data.value;
+                this.mutted.delete(path.join("."));
               }
             }.bind(this)
           );
@@ -163,11 +172,13 @@ class SharedClass {
         return;
       }
       if (data.path) {
+        this.mutted.add(data.path.join("."));
         let r = this.reactive;
         for (let step of data.path.slice(0, -1)) {
           r = r[step];
         }
         r[data.path.slice(-1)] = data.value;
+        this.mutted.delete(data.path.join("."));
       } else {
         this.reactive.error = data;
       }

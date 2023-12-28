@@ -16,8 +16,7 @@ const server = http.createServer(app);
 
 const clientPaths = {
   test2: {
-    w: true,
-    type: "number",
+    validation: (value) => typeof value === "number",
   },
 };
 const shared = new Shared({ server, clientPaths });
