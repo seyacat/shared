@@ -144,9 +144,6 @@ class SharedClass {
           );
         }.bind(this)
       );
-      this.options.server.listen(this.options.port, () => {
-        console.log(`server running on port ${this.options.port}`);
-      });
     } else {
       //CLIENT
       this.url =
