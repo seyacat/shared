@@ -100,11 +100,6 @@ class SharedClass {
       this.wss.on(
         "connection",
         function connection(ws) {
-          ws.id = uuidv4();
-          if (!this.reactive.clients[ws.id]) {
-            this.reactive.clients[ws.id] = Reactivate(ws);
-          }
-
           ws.on(
             "message",
             async function (msg) {
@@ -113,6 +108,23 @@ class SharedClass {
                 data = JSON.parse(msg);
               } catch (e) {
                 console.log("error", e);
+                return;
+              }
+              //BASIC AUTH
+              if (data.uuid) {
+                if (data.uuid === "_") {
+                  ws.id = uuidv4();
+                } else {
+                  ws.id = data.uuid;
+                }
+                if (!this.reactive.clients[ws.id]) {
+                  this.reactive.clients[ws.id] = Reactivate(ws);
+                }
+                this.reactive.clients[ws.id].triggerChange();
+                ws.send(JSON.stringify({ uuid: ws.id }));
+              }
+              //REJECT NO AUTH
+              if (!ws.id) {
                 return;
               }
               if (Array.isArray(data.path)) {
@@ -157,7 +169,8 @@ class SharedClass {
   wsInit = () => {
     this.ws = new WebSocket(this.url);
     this.ws.onopen = () => {
-      this.ws.send(JSON.stringify("it works! Yeeee! :))"));
+      const uuid = window.sessionStorage.getItem("uuid");
+      this.ws.send(JSON.stringify({ uuid: uuid ?? "_" }));
     };
     this.ws.onmessage = (event) => {
       let data;
@@ -167,6 +180,9 @@ class SharedClass {
         this.reactive.error = e;
         console.log("error", e);
         return;
+      }
+      if (data.uuid) {
+        window.sessionStorage.setItem("uuid", data.uuid);
       }
       if (data.path) {
         this.mutted.add(data.path.join("."));
