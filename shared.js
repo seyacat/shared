@@ -36,6 +36,7 @@ function Shared(
             path: ["server", ...data.path],
             base: null,
             pathValues: null,
+            value: data.value,
           })
         );
       }
@@ -43,7 +44,6 @@ function Shared(
     reactive.clients.subscribe(null, (data) => {
       //STOP MUTTED EVENTS
       if (reactive._rel.mutted.has(["clients", ...data.path].join("."))) {
-        console.log("mutted");
         return;
       }
       //TODO DELETE DISCONNECTED CLIENTS
@@ -53,13 +53,16 @@ function Shared(
       if (client._rel.readyState > 1) {
         delete reactive.clients[data.path.slice(0, 1)];
       }
+
       if (client && client._rel.readyState === 1) {
         client._rel.send(
           JSON.stringify({
-            ...data,
+            //...data,
+            pathIds: [client._obId, ...data.pathIds.slice(1)],
             path: ["client", ...data.path.slice(1)],
             base: null,
             pathValues: null,
+            value: data.value,
           })
         );
       }
@@ -118,10 +121,19 @@ class SharedClass {
                   ws.id = data.uuid;
                 }
                 if (!this.reactive.clients[ws.id]) {
-                  this.reactive.clients[ws.id] = Reactivate(ws);
+                  this.reactive.clients[ws.id] = Reactivate(
+                    ws,
+                    {},
+                    { prefix: ws.id }
+                  );
+                } else {
+                  this.reactive.clients[ws.id]._rel = ws;
+                  //
                 }
-                this.reactive.clients[ws.id].triggerChange();
+
                 ws.send(JSON.stringify({ uuid: ws.id }));
+                this.reactive.clients[ws.id].triggerChange();
+                return;
               }
               //REJECT NO AUTH
               if (!ws.id) {
@@ -132,7 +144,6 @@ class SharedClass {
 
                 if (this.options.clientPaths) {
                   const localPath = data.path.join(".");
-                  console.log(this.options.clientPaths[localPath]);
                   if (
                     !this.options.clientPaths[localPath]?.validation(data.value)
                   ) {
@@ -174,6 +185,7 @@ class SharedClass {
     };
     this.ws.onmessage = (event) => {
       let data;
+
       try {
         data = JSON.parse(event.data);
       } catch (e) {
@@ -183,15 +195,35 @@ class SharedClass {
       }
       if (data.uuid) {
         window.sessionStorage.setItem("uuid", data.uuid);
+        return;
       }
+
       if (data.path) {
+        console.log({ data });
         this.mutted.add(data.path.join("."));
         let r = this.reactive;
-        for (let step of data.path.slice(0, -1)) {
-          r = r[step];
+        //TODO RECURSIVE CREATE REACTIVES WITH IDS
+        for (let i in data.path) {
+          if (data.pathIds[i]) {
+            if (!r[data.path[i]]?._isReactive) {
+              r[data.path[i]] = Reactive(null, {
+                obId: data.pathIds[i],
+                const: true,
+              });
+            }
+          }
+          if (i == data.path.length - 1) {
+            r[data.path[i]] = data.value;
+          }
+          r = r[data.path[i]];
         }
-        r[data.path.slice(-1)] = data.value;
+
+        /*for (let step of data.path.slice(0, -1)) {
+          r = r[step];
+        }*/
+        //r[data.path.slice(-1)] = data.value;
         this.mutted.delete(data.path.join("."));
+        console.log({ reactive: this.reactive });
       } else {
         this.reactive.error = data;
       }
