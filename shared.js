@@ -21,52 +21,59 @@ function Shared(
       server: Reactive(null, { prefix: "server" }),
       clients: Reactive(null, { prefix: "clients" }),
     });
-    reactive.server.subscribe(null, (data) => {
-      //TODO DELETE DISCONNECTED CLIENTS
-      for (let [key, client] of reactive.clients) {
+    reactive.server.subscribe(
+      null,
+      (data) => {
+        //TODO DELETE DISCONNECTED CLIENTS
+        for (let [key, client] of reactive.clients) {
+          //DELETE DISNONNECTED
+          if (client._rel.readyState > 1) {
+            delete reactive.clients[key];
+            continue;
+          }
+          //SEND CHANGE
+          client._rel.send(
+            JSON.stringify({
+              ...data,
+              path: ["server", ...data.path],
+              base: null,
+              pathValues: null,
+              value: data.value,
+            })
+          );
+        }
+      },
+      { detailed: true }
+    );
+    reactive.clients.subscribe(
+      null,
+      (data) => {
+        //STOP MUTTED EVENTS
+        if (reactive._rel.mutted.has(["clients", ...data.path].join("."))) {
+          return;
+        }
+        if (data.path.length <= 1) return;
+        const client = reactive.clients[data.path.slice(0, 1)];
         //DELETE DISNONNECTED
         if (client._rel.readyState > 1) {
-          delete reactive.clients[key];
-          continue;
+          delete reactive.clients[data.path.slice(0, 1)];
         }
-        //SEND CHANGE
-        client._rel.send(
-          JSON.stringify({
-            ...data,
-            path: ["server", ...data.path],
-            base: null,
-            pathValues: null,
-            value: data.value,
-          })
-        );
-      }
-    });
-    reactive.clients.subscribe(null, (data) => {
-      //STOP MUTTED EVENTS
-      if (reactive._rel.mutted.has(["clients", ...data.path].join("."))) {
-        return;
-      }
-      //TODO DELETE DISCONNECTED CLIENTS
-      if (data.path.length <= 1) return;
-      const client = reactive.clients[data.path.slice(0, 1)];
-      //DELETE DISNONNECTED
-      if (client._rel.readyState > 1) {
-        delete reactive.clients[data.path.slice(0, 1)];
-      }
 
-      if (client && client._rel.readyState === 1) {
-        client._rel.send(
-          JSON.stringify({
-            //...data,
-            pathIds: [client._obId, ...data.pathIds.slice(1)],
-            path: ["client", ...data.path.slice(1)],
-            base: null,
-            pathValues: null,
-            value: data.value,
-          })
-        );
-      }
-    });
+        if (client && client._rel.readyState === 1) {
+          client._rel.send(
+            JSON.stringify({
+              //...data,
+              pathIds: [client._obId, ...data.pathIds.slice(1)],
+              path: ["client", ...data.path.slice(1)],
+              base: null,
+              pathValues: null,
+              value: data.value,
+            })
+          );
+        }
+      },
+      { detailed: true }
+    );
   } else {
     //CLIENT
     reactive = Reactivate(new SharedClass(options), {
@@ -120,6 +127,7 @@ class SharedClass {
                 } else {
                   ws.id = data.uuid;
                 }
+                //CREATE REACTIVES
                 if (!this.reactive.clients[ws.id]) {
                   this.reactive.clients[ws.id] = Reactivate(
                     ws,
@@ -199,31 +207,14 @@ class SharedClass {
       }
 
       if (data.path) {
-        console.log({ data });
         this.mutted.add(data.path.join("."));
-        let r = this.reactive;
         //TODO RECURSIVE CREATE REACTIVES WITH IDS
-        for (let i in data.path) {
-          if (data.pathIds[i]) {
-            if (!r[data.path[i]]?._isReactive) {
-              r[data.path[i]] = Reactive(null, {
-                obId: data.pathIds[i],
-                const: true,
-              });
-            }
-          }
-          if (i == data.path.length - 1) {
-            r[data.path[i]] = data.value;
-          }
-          r = r[data.path[i]];
-        }
+        console.log(data.value);
+        createChainFromDetailed(this.reactive, data.path[0], data.value);
 
-        /*for (let step of data.path.slice(0, -1)) {
-          r = r[step];
-        }*/
-        //r[data.path.slice(-1)] = data.value;
+        console.log(this.reactive);
+
         this.mutted.delete(data.path.join("."));
-        console.log({ reactive: this.reactive });
       } else {
         this.reactive.error = data;
       }
@@ -237,6 +228,17 @@ class SharedClass {
     };
   };
 }
+
+const createChainFromDetailed = (base, prop, detailed) => {
+  if (detailed?._obId) {
+    base[prop] = Reactive({}, { obId: detailed?._obId, const: true });
+    for (nextprop in detailed.value) {
+      createChainFromDetailed(base[prop], nextprop, detailed.value[nextprop]);
+    }
+  } else {
+    base[prop] = detailed;
+  }
+};
 
 if (typeof module !== "undefined") {
   module.exports = {
