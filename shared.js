@@ -91,6 +91,7 @@ function Shared(
             ...data,
             base: null,
             pathValues: null,
+            value: data.value,
           })
         );
       }
@@ -153,7 +154,7 @@ class SharedClass {
                 if (this.options.clientPaths) {
                   const localPath = data.path.join(".");
                   if (
-                    !this.options.clientPaths[localPath]?.validation(data.value)
+                    !this.options.clientPaths[localPath]?.validate(data.value)
                   ) {
                     ws.send(JSON.stringify({ error: `${data.path} rejected` }));
                     return;
@@ -187,13 +188,14 @@ class SharedClass {
 
   wsInit = () => {
     this.ws = new WebSocket(this.url);
-    this.ws.onopen = () => {
+    this.ws.onopen = (event) => {
+      this.reactive.event = event;
       const uuid = window.sessionStorage.getItem("uuid");
       this.ws.send(JSON.stringify({ uuid: uuid ?? "_" }));
     };
     this.ws.onmessage = (event) => {
+      this.reactive.event = event;
       let data;
-
       try {
         data = JSON.parse(event.data);
       } catch (e) {
@@ -209,10 +211,20 @@ class SharedClass {
       if (data.path) {
         this.mutted.add(data.path.join("."));
         //TODO RECURSIVE CREATE REACTIVES WITH IDS
-        console.log(data.value);
-        createChainFromDetailed(this.reactive, data.path[0], data.value);
+        let r = this.reactive;
+        //CREATE MISSING BASE TREE
+        for (let i in data.path.slice(0, -1)) {
+          const prop = data.path[i];
+          const obId = data.pathIds[i];
+          if (!r[prop] && obId) {
+            r[prop] = Reactive({}, { obId, const: true });
+          }
+          r = r[prop];
+        }
 
-        console.log(this.reactive);
+        const prop = data.path.slice(-1);
+
+        createChainFromDetailed(r, prop, data.value);
 
         this.mutted.delete(data.path.join("."));
       } else {
@@ -220,7 +232,8 @@ class SharedClass {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      this.reactive.event = event;
       console.log("disconnected");
       setTimeout(() => {
         this.wsInit();
