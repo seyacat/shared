@@ -2,6 +2,7 @@ if (typeof module !== "undefined") {
   var WS = require("ws");
   var { v4: uuidv4 } = require("uuid");
   var { Reactivate, Reactive } = require("@seyacat/reactive");
+  var dgram = require("node:dgram");
 } else {
   const reactive = document.createElement("script");
   reactive.setAttribute(
@@ -32,15 +33,21 @@ function Shared(
             continue;
           }
           //SEND CHANGE
-          client._rel.send(
-            JSON.stringify({
-              ...data,
-              path: ["server", ...data.path],
-              base: null,
-              pathValues: null,
-              value: data.value,
-            })
-          );
+          const msg = JSON.stringify({
+            ...data,
+            path: ["server", ...data.path],
+            base: null,
+            pathValues: null,
+            value: data.value,
+            address: options.address,
+            port: options.port,
+          });
+          if (client._rel.type === "udp4") {
+            const [ip, port] = key.split(":");
+            client._rel.send(msg, port, ip);
+          } else {
+            client._rel.send(msg);
+          }
         }
       },
       { detailed: true }
@@ -58,18 +65,24 @@ function Shared(
         if (client._rel.readyState > 1) {
           delete reactive.clients[data.path.slice(0, 1)];
         }
+        const msg = JSON.stringify({
+          //...data,
+          pathIds: [client._obId, ...data.pathIds.slice(1)],
+          path: ["client", ...data.path.slice(1)],
+          base: null,
+          pathValues: null,
+          value: data.value,
+          address: options.address,
+          port: options.port,
+        });
 
+        if (client && client._rel.type == "udp4") {
+          const [ip, port] = data.path[0].split(":");
+          console.log("CLIEN SEND");
+          client._rel.send(msg, port, ip);
+        }
         if (client && client._rel.readyState === 1) {
-          client._rel.send(
-            JSON.stringify({
-              //...data,
-              pathIds: [client._obId, ...data.pathIds.slice(1)],
-              path: ["client", ...data.path.slice(1)],
-              base: null,
-              pathValues: null,
-              value: data.value,
-            })
-          );
+          client._rel.send(msg);
         }
       },
       { detailed: true }
@@ -107,75 +120,20 @@ class SharedClass {
     this.options = { ...{ port: 12556, server: null }, ...options };
     if (this.options.server) {
       //SERVER
-      this.wss = new WS.Server({ server: this.options.server });
-      this.wss.on(
-        "connection",
-        function connection(ws) {
-          ws.on(
-            "message",
-            async function (msg) {
-              let data;
-              try {
-                data = JSON.parse(msg);
-              } catch (e) {
-                console.log("error", e);
-                return;
-              }
-              //BASIC AUTH
-              if (data.uuid) {
-                if (data.uuid === "_") {
-                  ws.id = uuidv4();
-                } else {
-                  ws.id = data.uuid;
-                }
-                //CREATE REACTIVES
-                if (!this.reactive.clients[ws.id]) {
-                  this.reactive.clients[ws.id] = Reactivate(
-                    ws,
-                    {},
-                    { prefix: ws.id }
-                  );
-                } else {
-                  this.reactive.clients[ws.id]._rel = ws;
-                  //
-                }
-
-                ws.send(JSON.stringify({ uuid: ws.id }));
-                this.reactive.clients[ws.id].triggerChange();
-                return;
-              }
-              //REJECT NO AUTH
-              if (!ws.id) {
-                return;
-              }
-              if (Array.isArray(data.path)) {
-                //CHECK CLIENT PATHS
-
-                if (this.options.clientPaths) {
-                  const localPath = data.path.join(".");
-                  if (
-                    !this.options.clientPaths[localPath]?.validate(data.value)
-                  ) {
-                    ws.send(JSON.stringify({ error: `${data.path} rejected` }));
-                    return;
-                  }
-                }
-                const path = ["clients", ws.id, ...data.path];
-                this.mutted.add(path.join("."));
-                let r = this.reactive;
-                for (let step of path.slice(0, -1)) {
-                  if (!r[step]) {
-                    r[step] = Reactive();
-                  }
-                  r = r[step];
-                }
-                r[path.slice(-1)] = data.value;
-                this.mutted.delete(path.join("."));
-              }
-            }.bind(this)
-          );
-        }.bind(this)
-      );
+      if (this.options.server.type == "udp4") {
+        this.options.server.on(
+          "message",
+          this.onmessage.bind({ shared: this })
+        );
+      } else {
+        this.wss = new WS.Server({ server: this.options.server });
+        this.wss.on(
+          "connection",
+          function connection(ws) {
+            ws.on("message", this.onmessage.bind({ shared: this, ws }));
+          }.bind(this)
+        );
+      }
     } else {
       //CLIENT
       this.url =
@@ -185,6 +143,93 @@ class SharedClass {
       this.wsInit();
     }
   }
+
+  onmessage = async function (msg, info) {
+    console.log("RECEIVED");
+    let sender;
+    let uuid;
+    if (this.ws) {
+      sender = this.ws;
+      uuid = this.ws.id;
+    }
+    /*if (info) {
+      console.log({ info });
+      //uuid = info.address + ":" + info.port;
+      //sender = this.shared.options.server;
+      sender = dgram.createSocket("udp4");
+    }*/
+    let data;
+    try {
+      data = JSON.parse(msg);
+      if (info) {
+        console.log({ info });
+        uuid = data.address + ":" + data.port;
+        //sender = this.shared.options.server;
+        sender = dgram.createSocket("udp4");
+      }
+      /*console.log(161, data);
+      sender.address = data.address;
+      sender.port = data.port;*/
+    } catch (e) {
+      console.log("error", e);
+      return;
+    }
+
+    //BASIC AUTH
+    if (data.uuid) {
+      if (data.uuid === "_") {
+        uuid = uuidv4();
+        const msg = JSON.stringify({ uuid: uuid });
+        sender.send(msg);
+        return;
+      } else {
+        uuid = data.uuid;
+        if (this.ws) {
+          this.ws.id = uuid;
+        }
+      }
+    }
+
+    if (!uuid) {
+      return;
+    }
+    //CREATE REACTIVES
+    if (!this.shared.reactive.clients[uuid]) {
+      this.shared.reactive.clients[uuid] = Reactivate(
+        sender,
+        {},
+        { prefix: uuid }
+      );
+      //this.shared.reactive.clients[uuid].triggerChange();
+    } else {
+      if (this.ws) {
+        this.shared.reactive.clients[uuid]._rel = sender;
+      }
+    }
+
+    if (Array.isArray(data.path)) {
+      //CHECK CLIENT PATHS
+
+      if (this.shared.options.clientPaths) {
+        const localPath = data.path.join(".");
+        if (!this.shared.options.clientPaths[localPath]?.validate(data.value)) {
+          sender.send(JSON.stringify({ error: `${data.path} rejected` }));
+          return;
+        }
+      }
+      const path = ["clients", uuid, ...data.path];
+      this.shared.mutted.add(path.join("."));
+      let r = this.shared.reactive;
+      for (let step of path.slice(0, -1)) {
+        if (!r[step]) {
+          r[step] = Reactive();
+        }
+        r = r[step];
+      }
+      r[path.slice(-1)] = data.value;
+      this.shared.mutted.delete(path.join("."));
+    }
+  };
 
   wsInit = () => {
     this.ws = new WebSocket(this.url);
